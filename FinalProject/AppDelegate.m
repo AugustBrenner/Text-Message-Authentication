@@ -7,6 +7,13 @@
 //
 
 #import "AppDelegate.h"
+#import "MainViewController.h"
+#import "PhoneNumberInputViewController.h"
+#import "ConfirmationCodeViewController.h"
+#import "CoreDataHelper.h"
+#import "SBJson.h"
+#import "AFNetworking.h"
+
 
 @implementation AppDelegate
 
@@ -16,11 +23,116 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
-    self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
-    // Override point for customization after application launch.
-    self.window.backgroundColor = [UIColor whiteColor];
+    
+#pragma mark set root view controller
+    
+    // Server Confirmation
+    
+    // Get device unique ID
+    UIDevice *device = [UIDevice currentDevice];
+    NSUUID *identifierForVendor = [device identifierForVendor];
+    NSString *vendorIdString = [identifierForVendor UUIDString];
+    
+    
+    // Prepare HTTP Request
+    NSURL *url = [NSURL URLWithString:@"http://ec2-54-214-119-14.us-west-2.compute.amazonaws.com/iOSFinalProject/"];
+    AFHTTPClient *httpClient = [[AFHTTPClient alloc] initWithBaseURL:url];
+    
+    NSDictionary *params = [NSDictionary dictionaryWithObjectsAndKeys:
+                            vendorIdString, @"vendor_id",
+                            nil];
+    
+    // Successful request
+    [httpClient postPath:@"" parameters:params success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        NSString *responseStr = [[NSString alloc] initWithData:responseObject encoding:NSUTF8StringEncoding];
+        NSLog(@"Request Successful, response '%@'", responseStr);
+        if ([responseStr.JSONRepresentation compare: @"confirmed"] == NSOrderedSame)
+        {
+            // Create an NSNumber boolean for confirmed and add it to core data
+            NSNumber *confirmationBoolean  = [NSNumber numberWithBool:YES];
+            [CoreDataHelper updateObjectForEntity:@"UserInfo" withKey:@"confirmed" withPredicate:nil andContext:self.managedObjectContext toValue:confirmationBoolean];
+            
+            NSLog(@"core data predicate working");
+        }
+        else if([CoreDataHelper countForEntity:@"UserInfo" withKey:@"phoneNumber" withKeyValue:responseStr.JSONRepresentation andContext:self.managedObjectContext] > 0)
+        {
+            // Create an NSNumber boolean for confirmed and add it to core data
+            NSNumber *confirmationBoolean  = [NSNumber numberWithBool:NO];
+            [CoreDataHelper updateObjectForEntity:@"UserInfo" withKey:@"confirmed" withPredicate:nil andContext:self.managedObjectContext toValue:confirmationBoolean];
+            
+            NSLog(@"core data working with json parser");
+            
+        }
+        
+        // Failed Request
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        
+        // 404 error handler
+        if ([error.localizedDescription compare: @" Expected status code in (200-299), got 404 Not found"] == TRUE) {
+           
+            // Create an NSNumber boolean for confirmed and add it to core data
+            NSFetchRequest * allRecords = [[NSFetchRequest alloc] init];
+            [allRecords setEntity:[NSEntityDescription entityForName:@"UserInfo" inManagedObjectContext:self.managedObjectContext]];
+            [allRecords setIncludesPropertyValues:NO]; //only fetch the managedObjectID
+            
+            NSError * error = nil;
+            NSArray * cars = [self.managedObjectContext executeFetchRequest:allRecords error:&error];
+            //error handling goes here
+            for (NSManagedObject * car in cars) {
+                [self.managedObjectContext deleteObject:car];
+            }
+            NSError *saveError = nil;
+            [self.managedObjectContext save:&saveError];
+        }
+        
+        // Log the errors
+        NSLog(@"[HTTPClient Error]: %@", error.localizedDescription);
+    }];
+    
+    // Core Data Confirmation
+    
+    
+    
+    // If statement queries core data and selects proper view
+    NSString *storyboardId = @"PhoneNumberInput";
+    NSPredicate *testForTrue =
+    [NSPredicate predicateWithFormat:@"confirmed == YES"];
+    
+    if([CoreDataHelper countForEntity:@"UserInfo" withPredicate:testForTrue andContext:self.managedObjectContext] > 0)
+    {
+        storyboardId =@"MainViewController";
+    }
+    else if([CoreDataHelper countForEntity:@"UserInfo" andContext:self.managedObjectContext] > 0)
+    {
+        storyboardId =  @"ConfirmationCodeInput";
+    }
+    
+    // Main storyboard reference is instantiated with storyboard ID
+    UIStoryboard *storyboard = [UIStoryboard storyboardWithName:@"MainStoryboard" bundle:nil];
+    
+    // View contoller reference is instantiated with storyboard ID selected in IF statement
+    UIViewController *initViewController = [storyboard instantiateViewControllerWithIdentifier:storyboardId];
+    
+    // Load the selected view controller and make it a key view
+    self.window.rootViewController = initViewController;
     [self.window makeKeyAndVisible];
+    
     return YES;
+    
+    // Override point for customization after application launch.
+}
+
+-(void)loadViewController:(NSString*)storyboardID
+{
+    // Main storyboard reference is instantiated with storyboard ID
+    UIStoryboard *storyboard = [UIStoryboard storyboardWithName:@"MainStoryboard" bundle:nil];
+    
+    // View contoller reference is instantiated with storyboard ID selected in IF statement
+    UIViewController *initViewController = [storyboard instantiateViewControllerWithIdentifier:storyboardID];
+    
+    // Load the selected view controller and make it a key view
+    self.window.rootViewController = initViewController;
+    [self.window makeKeyAndVisible];
 }
 
 - (void)applicationWillResignActive:(UIApplication *)application
